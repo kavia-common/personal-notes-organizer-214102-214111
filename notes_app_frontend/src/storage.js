@@ -105,7 +105,7 @@ function LocalStorageStorage() {
 
 /** Supabase-based storage (lazy import to avoid dependency if not configured) */
 function SupabaseStorage(url, key) {
-  // dynamic import using eval to avoid bundling if not used when env vars empty
+  // dynamic import to avoid bundling if not used when env vars are empty
   let supabase = null;
 
   async function ensureClient() {
@@ -166,15 +166,9 @@ function SupabaseStorage(url, key) {
 
   return { listNotes, createNote, updateNote, deleteNote, getNote, type: 'supabase' };
 }
-=======
-import React from 'react';
-import NotesApp from './NotesApp';
 
 // PUBLIC_INTERFACE
-function App() {
-  /** This is a public function that renders the Notes application. */
-  return <NotesApp />;
+export default function getStorage() {
+  /** This is a public function that returns the active storage provider (default export). */
+  return getStorageProvider();
 }
-
-export default App;
->>>>>>> REPLACE
