@@ -230,7 +230,20 @@ function AppInner() {
         hasSelection={!!selectedId}
         providerType={provider.type}
       />
-      <main className="main" role="main">
+      {provider.type === 'error' && (
+        <div className="empty" role="alert" aria-live="polite">
+          <div className="empty-card" style={{ borderColor: 'rgba(239,68,68,0.25)' }}>
+            <div className="empty-title">Supabase misconfiguration</div>
+            <div className="empty-desc">
+              {provider.error || 'There was a problem initializing Supabase. The app will not save changes to the backend.'}
+            </div>
+            <div className="empty-desc">
+              Ensure REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_KEY are set. Falling back to an empty view to prevent errors.
+            </div>
+          </div>
+        </div>
+      )}
+      <main className="main" role="main" aria-busy={provider.type === 'error' ? 'true' : 'false'}>
         <LeftPane
           notes={notes}
           selectedId={selectedId}

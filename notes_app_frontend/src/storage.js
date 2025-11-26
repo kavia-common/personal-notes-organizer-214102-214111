@@ -1,6 +1,7 @@
 /**
  * Storage abstraction for notes with optional Supabase backend.
  * Falls back to localStorage (session-persistent) if env vars not present.
+ * Defensive implementation to avoid uncaught runtime errors.
  */
 
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
@@ -17,22 +18,72 @@ function uuid() {
   });
 }
 
+/** Safe access to localStorage presence */
+function hasLocalStorage() {
+  try {
+    const testKey = '__notes_app_test__';
+    window.localStorage.setItem(testKey, '1');
+    window.localStorage.removeItem(testKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Safe JSON parse */
+function safeParse(json, fallback) {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return fallback;
+  }
+}
+
 /** Note model typedef
  * @typedef {{id: string, title: string, content: string, updated_at: string}} Note
  */
+
+/** Create a simple erroring provider with friendly messages to keep interface consistent */
+function ErrorProvider(message) {
+  async function thrower() {
+    throw new Error(message);
+  }
+  return {
+    listNotes: async () => {
+      // For list, prefer non-throw return to allow UI to show friendly banner
+      console.warn(message);
+      return [];
+    },
+    createNote: thrower,
+    updateNote: thrower,
+    deleteNote: thrower,
+    getNote: async () => null,
+    type: 'error',
+    error: message,
+  };
+}
 
 // PUBLIC_INTERFACE
 export function getStorageProvider() {
   /** This is a public function that returns the active storage provider:
    * - SupabaseStorage if REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_KEY are set and non-empty
    * - LocalStorage provider otherwise
+   * If Supabase init fails, returns an ErrorProvider so the UI can handle gracefully.
    */
   const hasSupabase =
     typeof SUPABASE_URL === 'string' && SUPABASE_URL.trim() !== '' &&
     typeof SUPABASE_KEY === 'string' && SUPABASE_KEY.trim() !== '';
+
   if (hasSupabase) {
-    return SupabaseStorage(SUPABASE_URL, SUPABASE_KEY);
+    try {
+      return SupabaseStorage(SUPABASE_URL, SUPABASE_KEY);
+    } catch (e) {
+      const msg = `Supabase initialization failed: ${e?.message || 'Unknown error'}`;
+      console.error(msg, e);
+      return ErrorProvider(msg);
+    }
   }
+
   return LocalStorageStorage();
 }
 
@@ -42,10 +93,11 @@ function LocalStorageStorage() {
 
   /** @returns {Note[]} */
   function loadAll() {
+    if (!hasLocalStorage()) return [];
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = window.localStorage.getItem(KEY);
       if (!raw) return [];
-      const parsed = JSON.parse(raw);
+      const parsed = safeParse(raw, []);
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
@@ -54,7 +106,12 @@ function LocalStorageStorage() {
 
   /** @param {Note[]} notes */
   function saveAll(notes) {
-    localStorage.setItem(KEY, JSON.stringify(notes));
+    if (!hasLocalStorage()) return;
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(notes));
+    } catch {
+      // ignore write errors (quota, privacy mode)
+    }
   }
 
   // PUBLIC_INTERFACE
@@ -110,9 +167,15 @@ function SupabaseStorage(url, key) {
 
   async function ensureClient() {
     if (supabase) return supabase;
-    const { createClient } = await import('@supabase/supabase-js');
-    supabase = createClient(url, key);
-    return supabase;
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      supabase = createClient(url, key);
+      return supabase;
+    } catch (e) {
+      const msg = `Failed to import or create Supabase client: ${e?.message || 'Unknown error'}`;
+      console.error(msg, e);
+      throw new Error(msg);
+    }
   }
 
   const table = 'notes';
@@ -121,7 +184,10 @@ function SupabaseStorage(url, key) {
   async function listNotes() {
     const client = await ensureClient();
     const { data, error } = await client.from(table).select('*').order('updated_at', { ascending: false });
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase listNotes error', error);
+      throw new Error(error.message || 'Supabase list error');
+    }
     return data || [];
   }
 
@@ -135,7 +201,10 @@ function SupabaseStorage(url, key) {
       updated_at: now,
     };
     const { data, error } = await client.from(table).insert(payload).select().single();
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase createNote error', error);
+      throw new Error(error.message || 'Supabase create error');
+    }
     return data;
   }
 
@@ -144,7 +213,10 @@ function SupabaseStorage(url, key) {
     const client = await ensureClient();
     const payload = { ...patch, updated_at: new Date().toISOString() };
     const { data, error } = await client.from(table).update(payload).eq('id', id).select().single();
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase updateNote error', error);
+      throw new Error(error.message || 'Supabase update error');
+    }
     return data;
   }
 
@@ -152,7 +224,10 @@ function SupabaseStorage(url, key) {
   async function deleteNote(id) {
     const client = await ensureClient();
     const { error } = await client.from(table).delete().eq('id', id);
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase deleteNote error', error);
+      throw new Error(error.message || 'Supabase delete error');
+    }
     return true;
   }
 
@@ -160,7 +235,10 @@ function SupabaseStorage(url, key) {
   async function getNote(id) {
     const client = await ensureClient();
     const { data, error } = await client.from(table).select('*').eq('id', id).single();
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase getNote error', error);
+      throw new Error(error.message || 'Supabase get error');
+    }
     return data;
   }
 
